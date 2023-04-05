@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include "printf.h"
 
+// Malloc
+void *prealloc_heap();
 
 void *sbrk_alloc(size_t size);
 void *mmap_alloc(size_t size);
@@ -14,10 +16,11 @@ void *mmap_alloc(size_t size);
 struct block_meta *find_free_block(size_t size);
 void *alloc_on_free_block(size_t size);
 
-struct block_meta *request_space(struct block_meta *last, size_t size);
-void *prealloc_heap();
-
 void *os_malloc(size_t size);
+
+// Free
+void merge_adjacent_block(struct block_meta *block_ptr);
 void os_free(void *ptr);
+
 void *os_calloc(size_t nmemb, size_t size);
 void *os_realloc(void *ptr, size_t size);

@@ -8,8 +8,8 @@
 #include <sys/mman.h> /* for mmap() */
 
 
-static struct block_meta *global_base = NULL;
-static bool heap_initialized = false;
+static struct block_meta *global_base = NULL; // Head of the linked list
+static bool heap_initialized = false; // Flag to check if the heap is initialized
 
 void *sbrk_alloc(size_t size)
 {
@@ -48,16 +48,24 @@ void *mmap_alloc(size_t size)
 struct block_meta *find_free_block(size_t size)
 {
 	struct block_meta *current = global_base;
+	struct block_meta *best_block = NULL;
+
 	size_t total_size = METADATA_SIZE + size;
+	size_t best_fit_size = 0;
+
 	while (current != NULL) {
 		if (current->status == STATUS_FREE && current->size >= total_size) {
 			// Found a free block that can hold the requested size
-			return current;
+			size_t curr_fit_size = current->size - total_size;
+			if (best_block == NULL || curr_fit_size < best_fit_size) {
+				best_block = current;
+				best_fit_size = curr_fit_size;
+			}
 		}
 		current = current->next;
 	}
 
-	return current;
+	return best_block;
 }
 
 void *alloc_on_free_block(size_t size)
@@ -90,26 +98,6 @@ void *prealloc_heap()
 	return (void *)(block + 1);
 }
 
-// `sbrk()` with NULL on first request
-struct block_meta *request_space(struct block_meta *last, size_t size)
-{
-	struct block_meta *block;
-	size_t total_size = METADATA_SIZE + size;
-	total_size = ALIGN(total_size);
-	block = (struct block_meta *) sbrk(total_size);
-	if (block == (void *) -1)
-		return NULL;
-
-	if (last) { // NULL on first request
-		last->next = block;
-	}
-
-	block->size = size;
-	block->status = STATUS_ALLOC;
-	block->next = NULL;
-	return block;
-}
-
 void *os_malloc(size_t size)
 {
 	struct block_meta *block;
@@ -130,11 +118,38 @@ void *os_malloc(size_t size)
 		return res ? res : sbrk_alloc(size);
 	}
 	else {
-		res = alloc_on_free_block(size);
-		return res ? res : mmap_alloc(size);
+		// res = alloc_on_free_block(size);
+		// return res ? res : mmap_alloc(size);
+		return mmap_alloc(size);
 	}
 
 	return res;
+}
+
+
+void merge_adjacent_block(struct block_meta *block_ptr)
+{
+	struct block_meta *prev = NULL;
+	struct block_meta *current = global_base;
+	while (current != NULL) {
+		if (current == block_ptr) {
+			/* Found the block to free */
+			if (prev != NULL && prev->status == STATUS_FREE) {
+				/* Merge the previous block with the current block */
+				prev->size += block_ptr->size + METADATA_SIZE;
+				prev->next = block_ptr->next;
+				block_ptr = prev;
+			}
+			if (current->next != NULL && block_ptr->next->status == STATUS_FREE) {
+				/* Merge the current block with the next block */
+				block_ptr->size += block_ptr->next->size + METADATA_SIZE;
+				block_ptr->next = block_ptr->next->next;
+			}
+			break;
+		}
+		prev = current;
+		current = current->next;
+	}
 }
 
 void os_free(void *ptr)
@@ -147,12 +162,21 @@ void os_free(void *ptr)
 
 	/* Check if the block is valid */
 	if (block_ptr->status == STATUS_MAPPED) {
-		/* The block was allocated using mmap() */
+		/* The block was allocated using `mmap()` */
 		if (munmap(block_ptr, block_ptr->size + METADATA_SIZE) == -1) {
 			/* munmap() failed */
 			return;
 		}
-	} 
+	} else if (block_ptr->status == STATUS_ALLOC) {
+		/* The block was allocated using `sbrk()` */
+		block_ptr->status = STATUS_FREE;
+
+		/* Merge adjacent if they exist */
+		merge_adjacent_block(block_ptr);
+	} else {
+		/* The block is invalid */
+		return;
+	}
 }
 
 void *os_calloc(size_t nmemb, size_t size)
