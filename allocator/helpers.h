@@ -36,5 +36,6 @@ struct block_meta {
 #define METADATA_SIZE	(sizeof(struct block_meta))
 #define PREALLOC_SIZE	(128 * 1024)
 #define MMAP_THRESHOLD	(128 * 1024)
+#define CALLOC_THRESHOLD	(4 * 1024)
 
 #define ALIGN(size) (((size) + 7) & ~7)

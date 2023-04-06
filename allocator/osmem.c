@@ -96,7 +96,22 @@ void *alloc_on_free_block(size_t size)
 	struct block_meta *block = find_best_free_block(size);
 	if (block == NULL)
 		return NULL;
+	
+	/* Split the block if possible */
+	if (block-> size > (METADATA_SIZE + ALIGN(size) + ALIGN(1))) {
+		struct block_meta *temp = (struct block_meta *) ((void *) block + METADATA_SIZE + ALIGN(size));
 
+		// Include the `temp` block in the linked list
+		temp->next = block->next;
+		block->next = temp;
+
+		// Update the `temp` block metadata
+		temp->size = block->size - METADATA_SIZE - ALIGN(size);
+		temp->status = STATUS_FREE;
+	}
+
+	/* Update the block metadata */
+	block->size = size;
 	block->status = STATUS_ALLOC;
 	return (void *)(block + 1);
 }
@@ -114,10 +129,20 @@ void *expand_last_block(size_t size)
 	/* Check if the last block is free */
 	if (last_block->status != STATUS_FREE)
 		return NULL;
-	exit(20);
 
 	/* Align the size */
 	size = ALIGN(size);
+
+    /* Calculate the current end of the heap */
+    void *curr_brk = sbrk(0);
+
+    /* Calculate the new end of the heap */
+    void *new_brk = last_block + METADATA_SIZE + last_block->size + size;
+    if (new_brk > curr_brk) {
+        /* Expand the heap using the brk() system call */
+        if (brk(new_brk) == -1)
+            return NULL;
+    }
 
 	/* Expand the last block */
 	void *new_block_ptr = sbrk(size);
