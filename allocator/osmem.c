@@ -23,8 +23,17 @@ void *sbrk_alloc(size_t size)
 	/* Initialize the block metadata */
 	block->size = size;
 	block->status = STATUS_ALLOC;
-	block->next = global_base;
-	global_base = block;
+	block->next = NULL;
+
+	/* Add the block to the linked list */
+	if (global_base == NULL) {
+		global_base = block;
+	} else {
+		struct block_meta *curr_block = global_base;
+		while (curr_block->next != NULL)
+			curr_block = curr_block->next;
+		curr_block->next = block;
+	}
 
 	return (void *)(block + 1);
 }
@@ -41,8 +50,19 @@ void *mmap_alloc(size_t size)
 
 	block->size = size;
 	block->status = STATUS_MAPPED;
-	block->next = global_base;
-	global_base = block;
+	block->next = NULL;
+	// block->next = global_base;
+	// global_base = block;
+
+	/* Add the block to the linked list */
+	if (global_base == NULL) {
+		global_base = block;
+	} else {
+		struct block_meta *curr_block = global_base;
+		while (curr_block->next != NULL)
+			curr_block = curr_block->next;
+		curr_block->next = block;
+	}
 
 	return (void *)(block + 1);
 }
@@ -60,11 +80,11 @@ void coalesce_blocks()
 				curr_block->size += METADATA_SIZE + curr_block->next->size;
 				curr_block->next = curr_block->next->next;
 				coalesced = true;
-				
 			} else {
 				curr_block = curr_block->next;
 			}
 		}
+		curr_block = global_base;
 	} while (coalesced);
 }
 
@@ -73,13 +93,12 @@ struct block_meta *find_best_free_block(size_t size)
 	struct block_meta *current = global_base;
 	struct block_meta *best_block = NULL;
 
-	size_t total_size = ALIGN(size); // + size;
+	size = ALIGN(size);
 	size_t best_fit_size = 0;
-
 	while (current != NULL) {
-		if (current->status == STATUS_FREE && current->size >= total_size) {
+		if (current->status == STATUS_FREE && current->size >= size) {
 			/* Found a free block that can hold the requested size */
-			size_t curr_fit_size = current->size - total_size;
+			size_t curr_fit_size = current->size - size;
 			if (best_block == NULL || curr_fit_size < best_fit_size) {
 				best_block = current;
 				best_fit_size = curr_fit_size;
@@ -91,6 +110,29 @@ struct block_meta *find_best_free_block(size_t size)
 	return best_block;
 }
 
+void *split_if_possible(struct block_meta *block, size_t size)
+{
+	size = ALIGN(size);
+
+	if (block->size > (METADATA_SIZE + size + ALIGN(1))) {
+		struct block_meta *temp = (struct block_meta *) ((void *) block + METADATA_SIZE + size);
+
+		/* Include the `temp` block in the linked list */
+		temp->next = block->next;
+		block->next = temp;
+
+		/* Update the `temp` block metadata */
+		temp->size = block->size - METADATA_SIZE - size;
+		temp->status = STATUS_FREE;
+	}
+
+	/* Update the block metadata */
+	block->size = size;
+	block->status = STATUS_ALLOC;
+
+	return (void *)(block + 1);
+}
+
 void *alloc_on_free_block(size_t size)
 {
 	struct block_meta *block = find_best_free_block(size);
@@ -98,22 +140,7 @@ void *alloc_on_free_block(size_t size)
 		return NULL;
 	
 	/* Split the block if possible */
-	if (block-> size > (METADATA_SIZE + ALIGN(size) + ALIGN(1))) {
-		struct block_meta *temp = (struct block_meta *) ((void *) block + METADATA_SIZE + ALIGN(size));
-
-		// Include the `temp` block in the linked list
-		temp->next = block->next;
-		block->next = temp;
-
-		// Update the `temp` block metadata
-		temp->size = block->size - METADATA_SIZE - ALIGN(size);
-		temp->status = STATUS_FREE;
-	}
-
-	/* Update the block metadata */
-	block->size = size;
-	block->status = STATUS_ALLOC;
-	return (void *)(block + 1);
+	return split_if_possible(block, size);
 }
 
 
@@ -123,6 +150,7 @@ void *expand_last_block(size_t size)
 	if (last_block == NULL)
 		return NULL;
 
+	/* Find the last block in the linked list */
 	while (last_block->next != NULL)
 		last_block = last_block->next;
 
@@ -133,26 +161,14 @@ void *expand_last_block(size_t size)
 	/* Align the size */
 	size = ALIGN(size);
 
-    /* Calculate the current end of the heap */
-    void *curr_brk = sbrk(0);
-
-    /* Calculate the new end of the heap */
-    void *new_brk = last_block + METADATA_SIZE + last_block->size + size;
-    if (new_brk > curr_brk) {
-        /* Expand the heap using the brk() system call */
-        if (brk(new_brk) == -1)
-            return NULL;
-    }
-
-	/* Expand the last block */
-	void *new_block_ptr = sbrk(size);
-	if (new_block_ptr == (void *) -1)
+	/* Expand the heap */
+	void *new_brk = sbrk(size - last_block->size);
+	if (new_brk == (void *) -1)
 		return NULL;
 
-	/* Update the last block */
-	last_block->size += size;
+	/* Update the block metadata */
+	last_block->size = size;
 	last_block->status = STATUS_ALLOC;
-	last_block->next = NULL;
 
 	return (void *)(last_block + 1);
 }
@@ -166,11 +182,12 @@ void *prealloc_heap()
 	if (block == (void *) -1)
 		return NULL;
 	
-	block->size = PREALLOC_SIZE;
+	block->size = PREALLOC_SIZE; // - METADATA_SIZE;
 	block->status = STATUS_FREE;
 	block->next = NULL;
 	global_base = block;
 	heap_initialized = true;
+	
 	return (void *)(block + 1);
 }
 
@@ -189,6 +206,9 @@ void *os_malloc(size_t size)
 		/* Initialize the heap for the first time */
 		if (!heap_initialized)
 			res = prealloc_heap();
+
+		/* Coalesce adjacent free blocks */
+		coalesce_blocks();
 		
 		/* Allocate on a free block */
 		res = alloc_on_free_block(size);
@@ -255,9 +275,9 @@ void os_free(void *ptr)
 	struct block_meta *block_ptr = (struct block_meta *) ptr - 1;
 
 	/* Find the block in the linked list */
-	void *res = block_ptr = find_block(block_ptr);
-	if (res == NULL)
-		return;
+	// block_ptr = find_block(block_ptr);
+	// if (block_ptr == NULL)
+		// return;
 
 	if (block_ptr->status == STATUS_MAPPED) {
 		/* The block was allocated using `mmap()` */
