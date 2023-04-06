@@ -15,7 +15,7 @@ static size_t threshold = MMAP_THRESHOLD; /* Threshold for `mmap()` when `malloc
 void *sbrk_alloc(size_t size)
 {
 	/* Allocate memory on the heap using `sbrk()` */
-	size_t total_size = METADATA_SIZE + ALIGN(size);
+	size_t total_size = METADATA_SIZE + size;
 	struct block_meta *block = (struct block_meta *) sbrk(total_size);
 	if (block == (void *) -1)
 		return NULL;
@@ -40,7 +40,7 @@ void *sbrk_alloc(size_t size)
 
 void *mmap_alloc(size_t size)
 {
-	size_t total_size = METADATA_SIZE + ALIGN(size);
+	size_t total_size = METADATA_SIZE + size;
 	struct block_meta *block = (struct block_meta *) mmap(NULL, total_size,
 											PROT_READ | PROT_WRITE,
 											MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -50,15 +50,13 @@ void *mmap_alloc(size_t size)
 	block->size = size;
 	block->status = STATUS_MAPPED;
 	block->next = NULL;
-
-	/* Add the block to the linked list */
+	
+	/* Add the block to the begging of the linked list */
 	if (global_base == NULL) {
 		global_base = block;
 	} else {
-		struct block_meta *curr_block = global_base;
-		while (curr_block->next != NULL)
-			curr_block = curr_block->next;
-		curr_block->next = block;
+		block->next = global_base;
+		global_base = block;
 	}
 
 	return (void *)(block + 1);
@@ -112,7 +110,7 @@ void *split_if_possible(struct block_meta *block, size_t size)
 	size = ALIGN(size);
 
 	if (block->size - size > METADATA_SIZE + ALIGN(1)) {
-		struct block_meta *temp = (struct block_meta *) ((void *) block + METADATA_SIZE + size);
+		struct block_meta *temp = (struct block_meta *) ((char *) block + METADATA_SIZE + size);
 
 		/* Include the `temp` block in the linked list */
 		temp->next = block->next;
@@ -199,7 +197,7 @@ void *os_malloc(size_t size)
 
 	void *res = NULL;
 	/* Alloc with `sbrk()` */
-    if (size < threshold) {
+    if (size + METADATA_SIZE < threshold) {
 		/* Initialize the heap for the first time */
 		if (!heap_initialized)
 			res = prealloc_heap();
@@ -276,13 +274,13 @@ void *os_calloc(size_t nmemb, size_t size)
 	if (nmemb == 0 || size == 0)
 		return NULL;
 	
-	size_t total_size = nmemb * size; // [TODO]: Check for overflow
+	size_t payload_size = nmemb * size; // [TODO]: Check for overflow
 	threshold = CALLOC_THRESHOLD;
-	void *ptr = os_malloc(total_size);
+	void *ptr = os_malloc(payload_size);
 	threshold = MMAP_THRESHOLD;
 	if (ptr == NULL)
 		return NULL;
-	memset(ptr, 0, total_size);
+	memset(ptr, 0, payload_size);
 	return ptr;
 }
 
