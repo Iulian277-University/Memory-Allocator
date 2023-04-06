@@ -10,12 +10,12 @@
 
 static struct block_meta *global_base = NULL; /* Head of the linked list */
 static bool heap_initialized = false; /* Flag to check if the heap is initialized */
+static size_t threshold = MMAP_THRESHOLD; /* Threshold for `mmap()` when `malloc()`ing or `calloc()`ing */
 
 void *sbrk_alloc(size_t size)
 {
 	/* Allocate memory on the heap using `sbrk()` */
 	size_t total_size = METADATA_SIZE + ALIGN(size);
-	// total_size = ALIGN(total_size);
 	struct block_meta *block = (struct block_meta *) sbrk(total_size);
 	if (block == (void *) -1)
 		return NULL;
@@ -41,18 +41,15 @@ void *sbrk_alloc(size_t size)
 void *mmap_alloc(size_t size)
 {
 	size_t total_size = METADATA_SIZE + ALIGN(size);
-	// total_size = ALIGN(total_size);
 	struct block_meta *block = (struct block_meta *) mmap(NULL, total_size,
 											PROT_READ | PROT_WRITE,
 											MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (block == (void *) -1) // block == MAP_FAILED
+	if (block == (void *) -1)
 		return NULL;
 
 	block->size = size;
 	block->status = STATUS_MAPPED;
 	block->next = NULL;
-	// block->next = global_base;
-	// global_base = block;
 
 	/* Add the block to the linked list */
 	if (global_base == NULL) {
@@ -114,7 +111,7 @@ void *split_if_possible(struct block_meta *block, size_t size)
 {
 	size = ALIGN(size);
 
-	if (block->size > (METADATA_SIZE + size + ALIGN(1))) {
+	if (block->size - size > METADATA_SIZE + ALIGN(1)) {
 		struct block_meta *temp = (struct block_meta *) ((void *) block + METADATA_SIZE + size);
 
 		/* Include the `temp` block in the linked list */
@@ -122,11 +119,11 @@ void *split_if_possible(struct block_meta *block, size_t size)
 		block->next = temp;
 
 		/* Update the `temp` block metadata */
-		temp->size = block->size - METADATA_SIZE - size;
+		temp->size = block->size - (METADATA_SIZE + size);
 		temp->status = STATUS_FREE;
 	}
 
-	/* Update the block metadata */
+	/* Update the `block` metadata */
 	block->size = size;
 	block->status = STATUS_ALLOC;
 
@@ -202,7 +199,7 @@ void *os_malloc(size_t size)
 
 	void *res = NULL;
 	/* Alloc with `sbrk()` */
-    if (size < MMAP_THRESHOLD) {
+    if (size < threshold) {
 		/* Initialize the heap for the first time */
 		if (!heap_initialized)
 			res = prealloc_heap();
@@ -254,18 +251,6 @@ void merge_adjacent_free_blocks(struct block_meta *block_ptr)
 	}
 }
 
-struct block_meta *find_block(struct block_meta *block_ptr)
-{
-	struct block_meta *current = global_base;
-	while (current != NULL) {
-		if (current == block_ptr)
-			return current;
-		current = current->next;
-	}
-	
-	return NULL;
-}
-
 void os_free(void *ptr)
 {
 	if (ptr == NULL)
@@ -274,10 +259,6 @@ void os_free(void *ptr)
 	/* Find the metadata block for the given ptr */
 	struct block_meta *block_ptr = (struct block_meta *) ptr - 1;
 
-	/* Find the block in the linked list */
-	// block_ptr = find_block(block_ptr);
-	// if (block_ptr == NULL)
-		// return;
 
 	if (block_ptr->status == STATUS_MAPPED) {
 		/* The block was allocated using `mmap()` */
@@ -287,17 +268,22 @@ void os_free(void *ptr)
 	} else if (block_ptr->status == STATUS_ALLOC) {
 		/* The block was allocated using `sbrk()` */
 		block_ptr->status = STATUS_FREE;
-
-		/* Merge adjacent free blocks  */
-		// coalesce_blocks();
-		// merge_adjacent_free_blocks(block_ptr);
 	}
 }
 
 void *os_calloc(size_t nmemb, size_t size)
 {
-	/* TODO: Implement os_calloc */
-	return NULL;
+	if (nmemb == 0 || size == 0)
+		return NULL;
+	
+	size_t total_size = nmemb * size; // [TODO]: Check for overflow
+	threshold = CALLOC_THRESHOLD;
+	void *ptr = os_malloc(total_size);
+	threshold = MMAP_THRESHOLD;
+	if (ptr == NULL)
+		return NULL;
+	memset(ptr, 0, total_size);
+	return ptr;
 }
 
 void *os_realloc(void *ptr, size_t size)

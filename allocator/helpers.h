@@ -33,9 +33,10 @@ struct block_meta {
 #define STATUS_MAPPED 2
 
 /* Predefined sizes */
-#define METADATA_SIZE	(sizeof(struct block_meta))
-#define PREALLOC_SIZE	(128 * 1024)
-#define MMAP_THRESHOLD	(128 * 1024)
-#define CALLOC_THRESHOLD	(4 * 1024)
+#define METADATA_SIZE		(sizeof(struct block_meta))
+#define PREALLOC_SIZE		(128 * 1024)
+#define MMAP_THRESHOLD		(128 * 1024)
+#define CALLOC_THRESHOLD	(  4 * 1024)
 
+/* Align `size` to 8 bytes */
 #define ALIGN(size) (((size) + 7) & ~7)
