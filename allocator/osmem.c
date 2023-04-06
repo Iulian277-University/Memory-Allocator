@@ -47,7 +47,28 @@ void *mmap_alloc(size_t size)
 	return (void *)(block + 1);
 }
 
-struct block_meta *find_free_block(size_t size)
+void coalesce_blocks()
+{
+    struct block_meta *curr_block = global_base;
+	bool coalesced = false;
+
+	do {
+		coalesced = false;
+		while (curr_block != NULL && curr_block->next != NULL) {
+			if (curr_block->status == STATUS_FREE && curr_block->next->status == STATUS_FREE) {
+				/* Coalesce adjacent free blocks */
+				curr_block->size += METADATA_SIZE + curr_block->next->size;
+				curr_block->next = curr_block->next->next;
+				coalesced = true;
+				
+			} else {
+				curr_block = curr_block->next;
+			}
+		}
+	} while (coalesced);
+}
+
+struct block_meta *find_best_free_block(size_t size)
 {
 	struct block_meta *current = global_base;
 	struct block_meta *best_block = NULL;
@@ -72,13 +93,43 @@ struct block_meta *find_free_block(size_t size)
 
 void *alloc_on_free_block(size_t size)
 {
-	struct block_meta *block = find_free_block(size);
-	if (block != NULL) {
-		block->status = STATUS_ALLOC;
-		return (void *)(block + 1);
-	}
+	struct block_meta *block = find_best_free_block(size);
+	if (block == NULL)
+		return NULL;
 
-	return NULL;
+	block->status = STATUS_ALLOC;
+	return (void *)(block + 1);
+}
+
+
+void *expand_last_block(size_t size)
+{
+	struct block_meta *last_block = global_base;
+	if (last_block == NULL)
+		return NULL;
+
+	while (last_block->next != NULL)
+		last_block = last_block->next;
+
+	/* Check if the last block is free */
+	if (last_block->status != STATUS_FREE)
+		return NULL;
+	exit(20);
+
+	/* Align the size */
+	size = ALIGN(size);
+
+	/* Expand the last block */
+	void *new_block_ptr = sbrk(size);
+	if (new_block_ptr == (void *) -1)
+		return NULL;
+
+	/* Update the last block */
+	last_block->size += size;
+	last_block->status = STATUS_ALLOC;
+	last_block->next = NULL;
+
+	return (void *)(last_block + 1);
 }
 
 void *prealloc_heap()
@@ -113,8 +164,19 @@ void *os_malloc(size_t size)
 		/* Initialize the heap for the first time */
 		if (!heap_initialized)
 			res = prealloc_heap();
+		
+		/* Allocate on a free block */
 		res = alloc_on_free_block(size);
-		return res ? res : sbrk_alloc(size);
+		if (res != NULL)
+			return res;
+		
+		/* Expand the last block */
+		res = expand_last_block(size);
+		if (res != NULL)
+			return res;
+
+		/* Allocate memory using `sbrk()` */
+		return sbrk_alloc(size);
 	}
 
 	/* Allocate memory using `mmap()` */
@@ -168,7 +230,9 @@ void os_free(void *ptr)
 	struct block_meta *block_ptr = (struct block_meta *) ptr - 1;
 
 	/* Find the block in the linked list */
-	block_ptr = find_block(block_ptr);
+	void *res = block_ptr = find_block(block_ptr);
+	if (res == NULL)
+		return;
 
 	if (block_ptr->status == STATUS_MAPPED) {
 		/* The block was allocated using `mmap()` */
@@ -180,7 +244,8 @@ void os_free(void *ptr)
 		block_ptr->status = STATUS_FREE;
 
 		/* Merge adjacent free blocks  */
-		merge_adjacent_free_blocks(block_ptr);
+		// coalesce_blocks();
+		// merge_adjacent_free_blocks(block_ptr);
 	}
 }
 

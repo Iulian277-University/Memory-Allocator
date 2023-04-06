@@ -13,12 +13,14 @@ void *prealloc_heap();
 void *sbrk_alloc(size_t size);
 void *mmap_alloc(size_t size);
 
-struct block_meta *find_free_block(size_t size);
+struct block_meta *find_best_free_block(size_t size);
 void *alloc_on_free_block(size_t size);
+void *expand_last_block(size_t size);
 
 void *os_malloc(size_t size);
 
 // Free
+void coalesce_blocks();
 void merge_adjacent_block(struct block_meta *block_ptr);
 struct block_meta *find_block(struct block_meta *block_ptr);
 void os_free(void *ptr);
