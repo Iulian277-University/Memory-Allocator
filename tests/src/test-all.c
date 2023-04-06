@@ -37,25 +37,25 @@ int main(void)
 	ptr = os_realloc_checked(ptr, 5000);
 	os_free(ptr);
 
-	for (int i = 0; i < NUM_SZ_SM * 3; i += 3) {
-		ptrs_sm1[i] = os_calloc_checked(1, inc_sz_sm[i]);
-		taint(ptrs_sm1[i], inc_sz_sm[i]);
-		ptrs_sm1[i + 1] = os_malloc_checked(dec_sz_sm[i]);
-		taint(ptrs_sm1[i + 1], dec_sz_sm[i]);
-		ptrs_sm1[i + 2] = os_calloc_checked(alt_sz_sm[i], 1);
-		taint(ptrs_sm1[i + 2], alt_sz_sm[i]);
+	for (int i = 0; i < NUM_SZ_SM; i++) {
+		ptrs_sm1[3 * i] = os_calloc_checked(1, inc_sz_sm[i]);
+		taint(ptrs_sm1[3 * i], inc_sz_sm[i]);
+		ptrs_sm1[3 * i + 1] = os_malloc_checked(dec_sz_sm[i]);
+		taint(ptrs_sm1[3 * i + 1], dec_sz_sm[i]);
+		ptrs_sm1[3 * i + 2] = os_calloc_checked(alt_sz_sm[i], 1);
+		taint(ptrs_sm1[3 * i + 2], alt_sz_sm[i]);
 	}
 
 	for (unsigned int i = 0; i < sizeof(free_idx) / sizeof(int); i++)
 		os_free(ptrs_sm1[free_idx[i]]);
 
-	for (int i = 0; i < NUM_SZ_SM * 3; i += 3) {
-		ptrs_sm2[i] = os_malloc_checked(alt_sz_sm[i]);
-		taint(ptrs_sm2[i], alt_sz_sm[i]);
-		ptrs_sm2[i + 1] = os_malloc_checked(inc_sz_sm[i]);
-		taint(ptrs_sm2[i + 1], inc_sz_sm[i]);
-		ptrs_sm2[i + 2] = os_calloc_checked(1, dec_sz_sm[i]);
-		taint(ptrs_sm2[i + 2], dec_sz_sm[i]);
+	for (int i = 0; i < NUM_SZ_SM; i++) {
+		ptrs_sm2[3 * i] = os_malloc_checked(alt_sz_sm[i]);
+		taint(ptrs_sm2[3 * i], alt_sz_sm[i]);
+		ptrs_sm2[3 * i + 1] = os_malloc_checked(inc_sz_sm[i]);
+		taint(ptrs_sm2[3 * i + 1], inc_sz_sm[i]);
+		ptrs_sm2[3 * i + 2] = os_calloc_checked(1, dec_sz_sm[i]);
+		taint(ptrs_sm2[3 * i + 2], dec_sz_sm[i]);
 	}
 
 	for (unsigned int i = 0; i < sizeof(realloc_sz) / sizeof(int); i++) {

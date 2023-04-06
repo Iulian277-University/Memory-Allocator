@@ -20,6 +20,7 @@ void *os_malloc(size_t size);
 
 // Free
 void merge_adjacent_block(struct block_meta *block_ptr);
+struct block_meta *find_block(struct block_meta *block_ptr);
 void os_free(void *ptr);
 
 void *os_calloc(size_t nmemb, size_t size);
