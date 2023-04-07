@@ -25,7 +25,7 @@ void *sbrk_alloc(size_t size)
 	block->status = STATUS_ALLOC;
 	block->next = NULL;
 
-	/* Add the block to the linked list */
+	/* Add the block to the *end* of the linked list */
 	if (global_base == NULL) {
 		global_base = block;
 	} else {
@@ -51,7 +51,7 @@ void *mmap_alloc(size_t size)
 	block->status = STATUS_MAPPED;
 	block->next = NULL;
 	
-	/* Add the block to the begging of the linked list */
+	/* Add the block to the *begging* of the linked list */
 	if (global_base == NULL) {
 		global_base = block;
 	} else {
@@ -109,6 +109,7 @@ void *split_if_possible(struct block_meta *block, size_t size)
 {
 	size = ALIGN(size);
 
+	/* Try to split the block */
 	if (block->size - size > METADATA_SIZE + ALIGN(1)) {
 		struct block_meta *temp = (struct block_meta *) ((char *) block + METADATA_SIZE + size);
 
@@ -117,12 +118,14 @@ void *split_if_possible(struct block_meta *block, size_t size)
 		block->next = temp;
 
 		/* Update the `temp` block metadata */
-		temp->size = block->size - (METADATA_SIZE + size);
+		temp->size = block->size - (size + METADATA_SIZE);
 		temp->status = STATUS_FREE;
+
+		/* Update the `block` metadata */
+		block->size = size;
 	}
 
-	/* Update the `block` metadata */
-	block->size = size;
+	/* Mark the `block` as allocated */
 	block->status = STATUS_ALLOC;
 
 	return (void *)(block + 1);
@@ -171,16 +174,16 @@ void *expand_last_block(size_t size)
 void *prealloc_heap()
 {
 	/* Initialize the heap for the first time */
-	size_t total_size = PREALLOC_SIZE;
-	total_size = ALIGN(total_size);
-	struct block_meta *block = (struct block_meta *) sbrk(total_size);
+	struct block_meta *block = (struct block_meta *) sbrk(ALIGN(PREALLOC_SIZE));
 	if (block == (void *) -1)
 		return NULL;
 	
 	block->size = PREALLOC_SIZE; // - METADATA_SIZE;
 	block->status = STATUS_FREE;
+
 	block->next = NULL;
 	global_base = block;
+
 	heap_initialized = true;
 	
 	return (void *)(block + 1);
@@ -197,7 +200,7 @@ void *os_malloc(size_t size)
 
 	void *res = NULL;
 	/* Alloc with `sbrk()` */
-    if (size + METADATA_SIZE < threshold) {
+    if (METADATA_SIZE + size < threshold) {
 		/* Initialize the heap for the first time */
 		if (!heap_initialized)
 			res = prealloc_heap();
@@ -256,8 +259,6 @@ void os_free(void *ptr)
 
 	/* Find the metadata block for the given ptr */
 	struct block_meta *block_ptr = (struct block_meta *) ptr - 1;
-
-
 	if (block_ptr->status == STATUS_MAPPED) {
 		/* The block was allocated using `mmap()` */
 		if (munmap(block_ptr, METADATA_SIZE + block_ptr->size) == -1) {
@@ -286,6 +287,73 @@ void *os_calloc(size_t nmemb, size_t size)
 
 void *os_realloc(void *ptr, size_t size)
 {
-	/* TODO: Implement os_realloc */
+	if (ptr == NULL)
+		return os_malloc(size);
+
+	if (size == 0) {
+		os_free(ptr);
+		return NULL;
+	}
+
+	coalesce_blocks();
+
+	struct block_meta *block_ptr = (struct block_meta *) ptr - 1;
+	size_t old_size = block_ptr->size;
+
+	if (block_ptr->status == STATUS_FREE)
+		return NULL;
+
+	/* Align the given `size` to the next multiple of 8 */
+	size = ALIGN(size);
+
+
+	/* The block was allocated with `mmap()` */
+	if (block_ptr->status == STATUS_MAPPED) {
+		void *new_ptr = os_malloc(size);
+		if (new_ptr == NULL)
+			return NULL;
+
+		size_t copy_size = old_size < size ? old_size : size;
+		memcpy(new_ptr, ptr, copy_size);
+
+		os_free(ptr);
+		return new_ptr;
+	}
+	
+	/* Split the block (truncate it) */
+	if (block_ptr->size >= size) {
+		split_if_possible(block_ptr, size);
+		return ptr;
+	}
+	
+	/* Expand the block */
+	if (block_ptr->status == STATUS_ALLOC && block_ptr->next != NULL && block_ptr->next->status == STATUS_FREE) {
+		/* The next block is free */
+		size_t new_size = block_ptr->size + METADATA_SIZE + block_ptr->next->size;
+		if (new_size >= size) {
+			/* Merge the next block with the current block */
+			block_ptr->size = new_size;
+			block_ptr->next = block_ptr->next->next;
+			split_if_possible(block_ptr, size);
+			return ptr;
+		}
+	}
+
+	/* The block was allocated on the heap with `sbrk()` */
+	if (block_ptr->status == STATUS_ALLOC) {
+		void *new_ptr = os_malloc(size);
+		if (new_ptr == NULL)
+			return NULL;
+			
+		size_t copy_size = old_size < size ? old_size : size;
+		memcpy(new_ptr, ptr, copy_size);
+		
+		struct block_meta *new_block_ptr = (struct block_meta *) new_ptr - 1;
+		new_block_ptr->size = size;
+
+		os_free(ptr);
+		return (void *)(new_block_ptr + 1);
+	}
+
 	return NULL;
 }

@@ -40,3 +40,5 @@ struct block_meta {
 
 /* Align `size` to 8 bytes */
 #define ALIGN(size) (((size) + 7) & ~7)
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
