@@ -326,6 +326,7 @@ void *os_realloc(void *ptr, size_t size)
 		return ptr;
 	}
 	
+	
 	/* Expand the block */
 	if (block_ptr->status == STATUS_ALLOC && block_ptr->next != NULL && block_ptr->next->status == STATUS_FREE) {
 		/* The next block is free */
